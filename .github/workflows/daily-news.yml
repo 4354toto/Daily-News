@@ -1,102 +1,76 @@
-name: Daily News Workflow - Fixed
+name: Daily News - Pure HTTP
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # 每天UTC 1:00 (北京时间9:00)
+    - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-    - name: Setup Node.js without cache
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'  # 这会查找 package-lock.json
-
-    - name: Create package.json and install Coze SDK
-      run: |
-        # 创建基本的 package.json
-        cat > package.json << 'EOF'
-        {
-          "name": "coze-workflow-trigger",
-          "version": "1.0.0",
-          "description": "",
-          "main": "index.js",
-          "dependencies": {
-            "@coze/api": "^1.0.0"
-          },
-          "scripts": {
-            "start": "node index.js"
-          }
-        }
-        EOF
-        
-        # 安装依赖
-        npm install
-
-    - name: Create and run trigger script
+    - name: Test with Pure HTTP
       env:
         COZE_TOKEN: ${{ secrets.COZE_TOKEN }}
       run: |
-        # 创建触发脚本
-        cat > trigger.js << 'EOF'
-        const { CozeAPI } = require('@coze/api');
-
-        async function main() {
-          try {
-            console.log('开始触发工作流...');
-            console.log('Workflow ID: 7562209382487113774');
-            
-            const apiClient = new CozeAPI({
-              token: process.env.COZE_TOKEN,
-              baseURL: 'https://api.coze.cn'
-            });
-
-            console.log('创建API客户端成功');
-            
-            const res = await apiClient.workflows.runs.stream({
-              workflow_id: '7562209382487113774',
-              parameters: {
-                "input": "https://auto.163.com/"
-              }
-            });
-
-            console.log('✅ 工作流触发成功！');
-            console.log('响应:', JSON.stringify(res, null, 2));
-            
-          } catch (error) {
-            console.error('❌ 工作流触发失败:');
-            console.error('错误名称:', error.name);
-            console.error('错误信息:', error.message);
-            console.error('错误堆栈:', error.stack);
-            
-            if (error.response) {
-              console.error('响应状态:', error.response.status);
-              console.error('响应头:', error.response.headers);
-              console.error('响应数据:', error.response.data);
-            }
-            
-            process.exit(1);
-          }
-        }
-
-        main();
-        EOF
+        # 创建 Node.js 脚本使用原生 http 模块
+        node << 'EOF'
+        const https = require('https');
         
-        # 运行脚本
-        node trigger.js
-
-    - name: Success
-      if: success()
-      run: |
-        echo "✅ 每日资讯工作流执行成功！"
-        echo "时间: $(date)"
-        echo "已处理: https://auto.163.com/"
-
-    - name: Failure
-      if: failure()
-      run: |
-        echo "❌ 工作流执行失败"
-        echo "可能原因: Token认证失败或权限不足"
+        const token = process.env.COZE_TOKEN;
+        const postData = JSON.stringify({
+          workflow_id: "7562209382487113774",
+          parameters: {
+            input: "https://auto.163.com/"
+          }
+        });
+        
+        console.log('Token 长度:', token.length);
+        console.log('Token 前10位:', token.substring(0, 10));
+        console.log('Token 后10位:', token.substring(token.length - 10));
+        
+        const options = {
+          hostname: 'api.coze.cn',
+          port: 443,
+          path: '/v1/workflow/stream_run',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData),
+            'Authorization': `Bearer ${token}`,
+            'User-Agent': 'GitHub-Actions-Node-HTTP'
+          }
+        };
+        
+        console.log('请求头:', JSON.stringify(options.headers, null, 2));
+        
+        const req = https.request(options, (res) => {
+          console.log('状态码:', res.statusCode);
+          console.log('响应头:', JSON.stringify(res.headers, null, 2));
+          
+          let data = '';
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+          
+          res.on('end', () => {
+            console.log('响应体:', data);
+            
+            if (res.statusCode === 200) {
+              console.log('✅ 工作流触发成功！');
+              process.exit(0);
+            } else {
+              console.log('❌ 工作流触发失败');
+              process.exit(1);
+            }
+          });
+        });
+        
+        req.on('error', (e) => {
+          console.error('请求错误:', e);
+          process.exit(1);
+        });
+        
+        req.write(postData);
+        req.end();
+        EOF
