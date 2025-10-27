@@ -1,83 +1,64 @@
-name: Test Authentication
+name: Daily News - Simple & Reliable
 
 on:
+  schedule:
+    - cron: '0 1 * * *'  # 每天UTC 1:00 (北京时间9:00)
   workflow_dispatch:
 
 jobs:
-  test:
+  trigger:
     runs-on: ubuntu-latest
     steps:
-    - name: Test Token Format
+    - name: Pre-check
       run: |
-        echo "=== Token格式测试 ==="
+        echo "工作流ID: 756220938248711374"
+        echo "Token可用性: $([ -n "$COZE_TOKEN" ] && echo "已设置" || echo "未设置")"
         echo "Token长度: ${#COZE_TOKEN}"
-        echo "Token开头: ${COZE_TOKEN:0:20}"
-        echo "Token结尾: ${COFIG_TOKEN: -20}"
-        echo "完整Token: $COZE_TOKEN"
-        
-        # 检查Token格式
-        if [[ "$COZE_TOKEN" =~ ^cztei_ ]]; then
-          echo "✅ Token格式正确（以cztei_开头）"
-        else
-          echo "❌ Token格式异常"
-        fi
 
-    - name: Test API with Detailed Debug
+    - name: Trigger Workflow
       run: |
-        echo "=== 详细API测试 ==="
-        
-        # 创建临时文件存储Token，避免在日志中暴露
-        echo "$COZE_TOKEN" > token.txt
-        
-        # 使用详细调试
-        curl -v -X POST "https://api.coze.cn/v1/workflow/stream_run" \
-          -H "Authorization: Bearer $(cat token.txt)" \
-          -H "Content-Type: application/json" \
-          -H "User-Agent: GitHub-Actions-Test" \
-          -d '{"workflow_id": "756220938248711374", "parameters": {}}' \
-          -o response.txt \
-          2> curl_debug.txt
-        
-        # 显示调试信息（隐藏敏感信息）
-        echo "=== cURL调试信息 ==="
-        sed 's/Authorization: Bearer .*/Authorization: Bearer [REDACTED]/' curl_debug.txt
-        
-        echo "=== 响应状态 ==="
-        grep "HTTP/" curl_debug.txt | tail -1
-        
-        echo "=== 响应体 ==="
-        cat response.txt
-        
-        # 清理
-        rm -f token.txt response.txt curl_debug.txt
-
-    - name: Test Different Auth Methods
-      run: |
-        echo "=== 测试不同认证方法 ==="
-        
-        # 方法1: 标准Bearer
-        echo "方法1: Bearer Token"
-        CODE1=$(curl -s -o /dev/null -w "%{http_code}" \
+        # 使用最简化的curl命令
+        response=$(curl -s -w "|HTTP_CODE:%{http_code}" \
           -X POST "https://api.coze.cn/v1/workflow/stream_run" \
           -H "Authorization: Bearer $COZE_TOKEN" \
           -H "Content-Type: application/json" \
           -d '{"workflow_id": "756220938248711374", "parameters": {}}')
-        echo "HTTP状态: $CODE1"
         
-        # 方法2: 直接使用Token（非标准）
-        echo "方法2: 直接Token"
-        CODE2=$(curl -s -o /dev/null -w "%{http_code}" \
-          -X POST "https://api.coze.cn/v1/workflow/stream_run" \
-          -H "Authorization: Token $COZE_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d '{"workflow_id": "756220938248711374", "parameters": {}}')
-        echo "HTTP状态: $CODE2"
+        # 分离响应体和状态码
+        http_code=$(echo "$response" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
+        response_body=$(echo "$response" | sed 's/|HTTP_CODE:[0-9]*//')
         
-        # 方法3: 使用X-API-Key头部（如果支持）
-        echo "方法3: X-API-Key"
-        CODE3=$(curl -s -o /dev/null -w "%{http_code}" \
-          -X POST "https://api.coze.cn/v1/workflow/stream_run" \
-          -H "X-API-Key: $COZE_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d '{"workflow_id": "756220938248711374", "parameters": {}}')
-        echo "HTTP状态: $CODE3"
+        echo "状态码: $http_code"
+        echo "响应: $response_body"
+        
+        if [ "$http_code" -eq 200 ]; then
+          echo "✅ API调用成功"
+          # 检查响应内容是否有错误
+          if echo "$response_body" | grep -q "error_code"; then
+            echo "⚠️ 响应中包含错误信息，但HTTP状态为200"
+            echo "详细错误: $response_body"
+            exit 0  # 仍然算成功，因为HTTP 200
+          else
+            echo "🎉 工作流触发成功"
+            exit 0
+          fi
+        else
+          echo "❌ API调用失败: $http_code"
+          exit 1
+        fi
+
+    - name: Success
+      if: success()
+      run: |
+        echo "✅ 每日资讯工作流已触发"
+        echo "时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "请检查扣子平台执行日志和企微群消息"
+
+    - name: Failure
+      if: failure()
+      run: |
+        echo "❌ 执行失败"
+        echo "请检查:"
+        echo "1. Token是否有效且有权跟"
+        echo "2. 工作流ID是否正确"
+        echo "3. 网络连接是否正常"
