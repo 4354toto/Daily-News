@@ -1,0 +1,18 @@
+name: Trigger Coze Workflow at 9AM Beijing Time
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # 每天UTC 1点，即北京时间上午9点
+
+jobs:
+  trigger-coze-workflow:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Coze API
+        env:
+          COZE_API_TOKEN: ${{ secrets.COZE_API_TOKEN }}
+        run: |
+          curl -X POST "https://api.coze.cn/v1/workflow/stream_run" \
+            -H "Authorization: Bearer $COZE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"workflow_id": "7565827159563550756"}'
