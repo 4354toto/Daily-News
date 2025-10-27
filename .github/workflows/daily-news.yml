@@ -1,4 +1,4 @@
-name: Daily News - Simple & Reliable
+name: Daily News Workflow
 
 on:
   schedule:
@@ -12,19 +12,19 @@ jobs:
     - name: Pre-check
       run: |
         echo "工作流ID: 756220938248711374"
-        echo "Token可用性: $([ -n "$COZE_TOKEN" ] && echo "已设置" || echo "未设置")"
         echo "Token长度: ${#COZE_TOKEN}"
 
-    - name: Trigger Workflow
+    - name: Trigger Workflow with Correct Prefix
       run: |
-        # 使用最简化的curl命令
+        echo "=== 使用正确的Authorization前缀 ==="
+        
+        # 方法1: 使用正确的Bearer前缀
         response=$(curl -s -w "|HTTP_CODE:%{http_code}" \
           -X POST "https://api.coze.cn/v1/workflow/stream_run" \
           -H "Authorization: Bearer $COZE_TOKEN" \
           -H "Content-Type: application/json" \
           -d '{"workflow_id": "756220938248711374", "parameters": {}}')
         
-        # 分离响应体和状态码
         http_code=$(echo "$response" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
         response_body=$(echo "$response" | sed 's/|HTTP_CODE:[0-9]*//')
         
@@ -33,13 +33,19 @@ jobs:
         
         if [ "$http_code" -eq 200 ]; then
           echo "✅ API调用成功"
-          # 检查响应内容是否有错误
-          if echo "$response_body" | grep -q "error_code"; then
-            echo "⚠️ 响应中包含错误信息，但HTTP状态为200"
-            echo "详细错误: $response_body"
-            exit 0  # 仍然算成功，因为HTTP 200
+          # 检查是否是流式响应
+          if echo "$response_body" | grep -q "event:"; then
+            echo "📡 收到流式响应，处理中..."
+            # 解析流式响应
+            if echo "$response_body" | grep -q "event: Error"; then
+              echo "❌ 流式响应中包含错误"
+              exit 1
+            else
+              echo "✅ 工作流触发成功"
+              exit 0
+            fi
           else
-            echo "🎉 工作流触发成功"
+            echo "✅ 工作流触发成功"
             exit 0
           fi
         else
@@ -52,13 +58,11 @@ jobs:
       run: |
         echo "✅ 每日资讯工作流已触发"
         echo "时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
         echo "请检查扣子平台执行日志和企微群消息"
 
     - name: Failure
       if: failure()
       run: |
         echo "❌ 执行失败"
-        echo "请检查:"
-        echo "1. Token是否有效且有权跟"
-        echo "2. 工作流ID是否正确"
-        echo "3. 网络连接是否正常"
+        echo "请检查Token权限和工作流配置"
