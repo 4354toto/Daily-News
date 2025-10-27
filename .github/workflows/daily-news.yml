@@ -9,74 +9,131 @@ jobs:
   trigger-coze:
     runs-on: ubuntu-latest
     steps:
-    - name: Verify Token and Environment
+    - name: Verify Configuration
       run: |
-        echo "=== 环境验证 ==="
-        echo "Runner OS: $RUNNER_OS"
-        echo "Token长度: ${#COZE_TOKEN}"
-        echo "Token前6位: ${COZE_TOKEN:0:6}"
-        echo "Token后6位: ${COZE_TOKEN: -6}"
-        echo "工作流ID: 7565827159563550756"
+        echo "=== 配置验证 ==="
+        echo "工作流ID: 756220938248711374"
+        echo "Token预览: ...${COZE_TOKEN: -8}"
         echo "API端点: https://api.coze.cn/v1/workflow/stream_run"
+        echo "执行时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
-    - name: Test API with Detailed Response
+    - name: Trigger Workflow with Stream Handling
+      id: trigger
       run: |
-        echo "=== 测试API调用 ==="
+        echo "=== 触发工作流 ==="
         
-        # 使用更详细的curl命令
-        curl -v -X POST "https://api.coze.cn/v1/workflow/stream_run" \
-          -H "Authorization: Bearer ${{ secrets.COZE_TOKEN }}" \
-          -H "Content-Type: application/json" \
-          -H "Accept: application/json" \
-          -d '{"workflow_id": "7565827159563550756", "parameters": {}}' \
-          -o response_body.txt \
-          -w "HTTP_STATUS:%{http_code}" \
-          2> curl_log.txt
+        # 使用Python处理流式响应
+        python3 << 'EOF'
+        import requests
+        import json
+        import os
+        import sys
         
-        # 读取HTTP状态码
-        HTTP_CODE=$(grep -o 'HTTP_STATUS:[0-9]*' curl_log.txt | cut -d':' -f2)
-        echo "HTTP状态码: $HTTP_CODE"
+        # 配置
+        token = os.environ.get('COZE_TOKEN')
+        workflow_id = "756220938248711374"
+        url = "https://api.coze.cn/v1/workflow/stream_run"
         
-        # 显示详细日志
-        echo "=== cURL详细日志 ==="
-        cat curl_log.txt
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream"
+        }
         
-        # 显示响应体
-        echo "=== 响应体 ==="
-        if [ -f "response_body.txt" ]; then
-          cat response_body.txt
-          echo ""
+        data = {
+            "workflow_id": workflow_id,
+            "parameters": {}
+        }
+        
+        print(f"发送请求到: {url}")
+        print(f"工作流ID: {workflow_id}")
+        
+        try:
+            response = requests.post(url, json=data, headers=headers, stream=True, timeout=30)
+            print(f"HTTP状态码: {response.status_code}")
+            
+            if response.status_code != 200:
+                print(f"❌ 请求失败: {response.status_code}")
+                print(f"响应: {response.text}")
+                sys.exit(1)
+            
+            # 处理流式响应
+            success = False
+            error_detected = False
+            
+            for line in response.iter_lines(decode_unicode=True):
+                if line:
+                    print(f"收到: {line}")
+                    
+                    if line.startswith('event:'):
+                        event_type = line.replace('event:', '').strip()
+                        if event_type == 'Error':
+                            error_detected = True
+                        elif event_type in ['Success', 'Complete', 'Done']:
+                            success = True
+                    
+                    elif line.startswith('data:'):
+                        data_content = line.replace('data:', '').strip()
+                        if data_content:
+                            try:
+                                data_json = json.loads(data_content)
+                                if 'error_code' in data_json:
+                                    print(f"❌ 错误代码: {data_json['error_code']}")
+                                    print(f"错误信息: {data_json.get('error_message', '无详细信息')}")
+                                    error_detected = True
+                                elif 'status' in data_json and data_json['status'] == 'success':
+                                    success = True
+                            except json.JSONDecodeError:
+                                print(f"数据内容: {data_content}")
+            
+            if error_detected:
+                print("❌ 工作流执行失败")
+                sys.exit(1)
+            elif success:
+                print("✅ 工作流执行成功")
+                sys.exit(0)
+            else:
+                print("⚠️ 无法确定执行结果，请检查扣子平台日志")
+                # 如果没有明确错误，认为是成功
+                sys.exit(0)
+                
+        except requests.exceptions.RequestException as e:
+            print(f"❌ 请求异常: {e}")
+            sys.exit(1)
+        EOF
+
+    - name: Check Result
+      run: |
+        echo "上一步退出代码: ${{ steps.trigger.outcome }}"
+        if [ "${{ steps.trigger.outcome }}" == "success" ]; then
+          echo "✅ 工作流触发成功"
         else
-          echo "无响应体"
-        fi
-        
-        # 清理临时文件
-        rm -f response_body.txt curl_log.txt
-        
-        # 根据状态码判断结果
-        if [ "$HTTP_CODE" -eq 200 ]; then
-          echo "✅ API调用成功！"
-          echo "注意：如果企微群未收到消息，请检查扣子平台工作流配置"
-          exit 0
-        else
-          echo "❌ API调用失败，状态码: $HTTP_CODE"
-          exit 1
+          echo "❌ 工作流触发失败"
         fi
 
     - name: Success Notification
       if: success()
       run: |
-        echo "🎉 GitHub Actions 执行成功！"
+        echo "🎉 每日资讯工作流执行成功！"
         echo "执行时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
         echo "北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
         echo ""
-        echo "⚠️ 如果企微群未收到消息，请检查："
-        echo "1. 扣子平台工作流中的企微机器人配置"
-        echo "2. 企微群机器人的Webhook地址"
-        echo "3. 工作流执行日志"
+        echo "✅ GitHub Actions 已成功触发扣子工作流"
+        echo "📱 请检查企微群是否收到消息"
 
     - name: Failure Notification
       if: failure()
       run: |
-        echo "❌ GitHub Actions 执行失败"
+        echo "❌ 工作流执行失败"
         echo "失败时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo ""
+        echo "可能的原因："
+        echo "1. Token 没有工作流执行权限"
+        echo "2. 工作流 ID 不正确"
+        echo "3. 工作流未发布或已禁用"
+        echo "4. 网络连接问题"
+        echo ""
+        echo "请检查："
+        echo "- 扣子平台 Token 权限设置"
+        echo "- 工作流 ID 是否正确"
+        echo "- 工作流是否已发布"
