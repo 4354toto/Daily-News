@@ -1,76 +1,79 @@
-name: Daily News Workflow - Enhanced
+name: Daily News Workflow
 
 on:
   schedule:
-    - cron: '0 1 * * *'
+    - cron: '0 1 * * *'  # 每天UTC 1:00 (北京时间9:00)
   workflow_dispatch:
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-    - name: Trigger with Multiple Auth Methods
-      run: |
-        echo "=== 尝试多种认证方法 ==="
-        
-        # 方法1: 标准Bearer前缀
-        echo "方法1: Bearer前缀"
-        response1=$(curl -s -w "|HTTP_CODE:%{http_code}" \
-          -X POST "https://api.coze.cn/v1/workflow/stream_run" \
-          -H "Authorization: Bearer $COZE_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d '{"workflow_id": "756220938248711374", "parameters": {}}')
-        
-        code1=$(echo "$response1" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
-        body1=$(echo "$response1" | sed 's/|HTTP_CODE:[0-9]*//')
-        
-        echo "方法1状态码: $code1"
-        
-        if [ "$code1" -eq 200 ]; then
-          echo "✅ 方法1成功"
-          echo "响应: $body1"
-          exit 0
-        fi
-        
-        # 方法2: 尝试其他可能的前缀
-        echo "方法2: 尝试其他前缀"
-        prefixes=("Bearer" "Token" "Coze" "APIKey")
-        
-        for prefix in "${prefixes[@]}"; do
-          echo "尝试前缀: $prefix"
-          response=$(curl -s -w "|HTTP_CODE:%{http_code}" \
-            -X POST "https://api.coze.cn/v1/workflow/stream_run" \
-            -H "Authorization: $prefix $COZE_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"workflow_id": "756220938248711374", "parameters": {}}')
-          
-          code=$(echo "$response" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
-          body=$(echo "$response" | sed 's/|HTTP_CODE:[0-9]*//')
-          
-          echo "$prefix 状态码: $code"
-          
-          if [ "$code" -eq 200 ]; then
-            echo "✅ 使用前缀 '$prefix' 成功"
-            echo "响应: $body"
-            exit 0
-          fi
-        done
-        
-        echo "❌ 所有认证方法都失败"
-        echo "最后错误响应: $body1"
-        exit 1
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
 
-    - name: Success
+    - name: Install Coze SDK
+      run: |
+        npm install @coze/api
+
+    - name: Trigger Coze Workflow
+      env:
+        COZE_TOKEN: ${{ secrets.COZE_TOKEN }}
+      run: |
+        node -e "
+        const { CozeAPI } = require('@coze/api');
+
+        async function triggerWorkflow() {
+          try {
+            console.log('开始触发工作流...');
+            
+            const apiClient = new CozeAPI({
+              token: process.env.COZE_TOKEN,
+              baseURL: 'https://api.coze.cn'
+            });
+
+            const res = await apiClient.workflows.runs.stream({
+              workflow_id: '7562209382487113774',
+              parameters: {
+                input: 'https://auto.163.com/'
+              }
+            });
+
+            console.log('✅ 工作流触发成功！');
+            console.log('响应:', JSON.stringify(res, null, 2));
+            
+          } catch (error) {
+            console.error('❌ 工作流触发失败:');
+            console.error('错误信息:', error.message);
+            if (error.response) {
+              console.error('状态码:', error.response.status);
+              console.error('响应数据:', error.response.data);
+            }
+            process.exit(1);
+          }
+        }
+
+        triggerWorkflow();
+        "
+
+    - name: Success Notification
       if: success()
       run: |
-        echo "🎉 工作流触发成功"
-        echo "执行时间: $(date)"
+        echo "🎉 每日资讯工作流执行成功！"
+        echo "执行时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
+        echo "已触发工作流 ID: 7562209382487113774"
+        echo "输入参数: https://auto.163.com/"
 
-    - name: Failure
+    - name: Failure Notification
       if: failure()
       run: |
-        echo "❌ 工作流触发失败"
-        echo "可能原因:"
-        echo "1. Token权限不足"
-        echo "2. 工作流ID错误"
-        echo "3. API端点变更"
+        echo "❌ 工作流执行失败"
+        echo "失败时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "请检查:"
+        echo "1. Token权限设置"
+        echo "2. 工作流ID是否正确"
+        echo "3. 网络连接"
