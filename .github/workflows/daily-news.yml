@@ -1,139 +1,83 @@
-name: Daily News Workflow
+name: Test Authentication
 
 on:
-  schedule:
-    - cron: '0 1 * * *'  # 每天UTC 1:00 (北京时间9:00)
   workflow_dispatch:
 
 jobs:
-  trigger-coze:
+  test:
     runs-on: ubuntu-latest
     steps:
-    - name: Verify Configuration
+    - name: Test Token Format
       run: |
-        echo "=== 配置验证 ==="
-        echo "工作流ID: 756220938248711374"
-        echo "Token预览: ...${COZE_TOKEN: -8}"
-        echo "API端点: https://api.coze.cn/v1/workflow/stream_run"
-        echo "执行时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-
-    - name: Trigger Workflow with Stream Handling
-      id: trigger
-      run: |
-        echo "=== 触发工作流 ==="
+        echo "=== Token格式测试 ==="
+        echo "Token长度: ${#COZE_TOKEN}"
+        echo "Token开头: ${COZE_TOKEN:0:20}"
+        echo "Token结尾: ${COFIG_TOKEN: -20}"
+        echo "完整Token: $COZE_TOKEN"
         
-        # 使用Python处理流式响应
-        python3 << 'EOF'
-        import requests
-        import json
-        import os
-        import sys
-        
-        # 配置
-        token = os.environ.get('COZE_TOKEN')
-        workflow_id = "756220938248711374"
-        url = "https://api.coze.cn/v1/workflow/stream_run"
-        
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream"
-        }
-        
-        data = {
-            "workflow_id": workflow_id,
-            "parameters": {}
-        }
-        
-        print(f"发送请求到: {url}")
-        print(f"工作流ID: {workflow_id}")
-        
-        try:
-            response = requests.post(url, json=data, headers=headers, stream=True, timeout=30)
-            print(f"HTTP状态码: {response.status_code}")
-            
-            if response.status_code != 200:
-                print(f"❌ 请求失败: {response.status_code}")
-                print(f"响应: {response.text}")
-                sys.exit(1)
-            
-            # 处理流式响应
-            success = False
-            error_detected = False
-            
-            for line in response.iter_lines(decode_unicode=True):
-                if line:
-                    print(f"收到: {line}")
-                    
-                    if line.startswith('event:'):
-                        event_type = line.replace('event:', '').strip()
-                        if event_type == 'Error':
-                            error_detected = True
-                        elif event_type in ['Success', 'Complete', 'Done']:
-                            success = True
-                    
-                    elif line.startswith('data:'):
-                        data_content = line.replace('data:', '').strip()
-                        if data_content:
-                            try:
-                                data_json = json.loads(data_content)
-                                if 'error_code' in data_json:
-                                    print(f"❌ 错误代码: {data_json['error_code']}")
-                                    print(f"错误信息: {data_json.get('error_message', '无详细信息')}")
-                                    error_detected = True
-                                elif 'status' in data_json and data_json['status'] == 'success':
-                                    success = True
-                            except json.JSONDecodeError:
-                                print(f"数据内容: {data_content}")
-            
-            if error_detected:
-                print("❌ 工作流执行失败")
-                sys.exit(1)
-            elif success:
-                print("✅ 工作流执行成功")
-                sys.exit(0)
-            else:
-                print("⚠️ 无法确定执行结果，请检查扣子平台日志")
-                # 如果没有明确错误，认为是成功
-                sys.exit(0)
-                
-        except requests.exceptions.RequestException as e:
-            print(f"❌ 请求异常: {e}")
-            sys.exit(1)
-        EOF
-
-    - name: Check Result
-      run: |
-        echo "上一步退出代码: ${{ steps.trigger.outcome }}"
-        if [ "${{ steps.trigger.outcome }}" == "success" ]; then
-          echo "✅ 工作流触发成功"
+        # 检查Token格式
+        if [[ "$COZE_TOKEN" =~ ^cztei_ ]]; then
+          echo "✅ Token格式正确（以cztei_开头）"
         else
-          echo "❌ 工作流触发失败"
+          echo "❌ Token格式异常"
         fi
 
-    - name: Success Notification
-      if: success()
+    - name: Test API with Detailed Debug
       run: |
-        echo "🎉 每日资讯工作流执行成功！"
-        echo "执行时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
-        echo ""
-        echo "✅ GitHub Actions 已成功触发扣子工作流"
-        echo "📱 请检查企微群是否收到消息"
+        echo "=== 详细API测试 ==="
+        
+        # 创建临时文件存储Token，避免在日志中暴露
+        echo "$COZE_TOKEN" > token.txt
+        
+        # 使用详细调试
+        curl -v -X POST "https://api.coze.cn/v1/workflow/stream_run" \
+          -H "Authorization: Bearer $(cat token.txt)" \
+          -H "Content-Type: application/json" \
+          -H "User-Agent: GitHub-Actions-Test" \
+          -d '{"workflow_id": "756220938248711374", "parameters": {}}' \
+          -o response.txt \
+          2> curl_debug.txt
+        
+        # 显示调试信息（隐藏敏感信息）
+        echo "=== cURL调试信息 ==="
+        sed 's/Authorization: Bearer .*/Authorization: Bearer [REDACTED]/' curl_debug.txt
+        
+        echo "=== 响应状态 ==="
+        grep "HTTP/" curl_debug.txt | tail -1
+        
+        echo "=== 响应体 ==="
+        cat response.txt
+        
+        # 清理
+        rm -f token.txt response.txt curl_debug.txt
 
-    - name: Failure Notification
-      if: failure()
+    - name: Test Different Auth Methods
       run: |
-        echo "❌ 工作流执行失败"
-        echo "失败时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo ""
-        echo "可能的原因："
-        echo "1. Token 没有工作流执行权限"
-        echo "2. 工作流 ID 不正确"
-        echo "3. 工作流未发布或已禁用"
-        echo "4. 网络连接问题"
-        echo ""
-        echo "请检查："
-        echo "- 扣子平台 Token 权限设置"
-        echo "- 工作流 ID 是否正确"
-        echo "- 工作流是否已发布"
+        echo "=== 测试不同认证方法 ==="
+        
+        # 方法1: 标准Bearer
+        echo "方法1: Bearer Token"
+        CODE1=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X POST "https://api.coze.cn/v1/workflow/stream_run" \
+          -H "Authorization: Bearer $COZE_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"workflow_id": "756220938248711374", "parameters": {}}')
+        echo "HTTP状态: $CODE1"
+        
+        # 方法2: 直接使用Token（非标准）
+        echo "方法2: 直接Token"
+        CODE2=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X POST "https://api.coze.cn/v1/workflow/stream_run" \
+          -H "Authorization: Token $COZE_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"workflow_id": "756220938248711374", "parameters": {}}')
+        echo "HTTP状态: $CODE2"
+        
+        # 方法3: 使用X-API-Key头部（如果支持）
+        echo "方法3: X-API-Key"
+        CODE3=$(curl -s -o /dev/null -w "%{http_code}" \
+          -X POST "https://api.coze.cn/v1/workflow/stream_run" \
+          -H "X-API-Key: $COZE_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"workflow_id": "756220938248711374", "parameters": {}}')
+        echo "HTTP状态: $CODE3"
