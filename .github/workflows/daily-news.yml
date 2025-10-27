@@ -9,46 +9,68 @@ jobs:
   trigger-coze:
     runs-on: ubuntu-latest
     steps:
-    - name: Check Token and Config
+    - name: Verify Token and Environment
       run: |
-        echo "Token preview: ...${COZE_TOKEN: -8}"
-        echo "Workflow ID: 7565827159563550756"
-        echo "API Endpoint: https://api.coze.cn/v1/workflow/stream_run"
+        echo "=== 环境验证 ==="
+        echo "Runner OS: $RUNNER_OS"
+        echo "Token长度: ${#COZE_TOKEN}"
+        echo "Token前6位: ${COZE_TOKEN:0:6}"
+        echo "Token后6位: ${COZE_TOKEN: -6}"
+        echo "工作流ID: 7565827159563550756"
+        echo "API端点: https://api.coze.cn/v1/workflow/stream_run"
 
-    - name: Trigger Coze Workflow
+    - name: Test API with New Token
       run: |
-        # 使用简单的curl命令
-        response=$(curl -s -o response_body.txt -w "%{http_code}" \
+        echo "=== 测试API调用 ==="
+        
+        # 创建请求数据
+        REQUEST_DATA='{"workflow_id": "7565827159563550756", "parameters": {}}'
+        
+        # 发送请求并捕获完整响应
+        HTTP_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}" \
           -X POST "https://api.coze.cn/v1/workflow/stream_run" \
           -H "Authorization: Bearer ${{ secrets.COZE_TOKEN }}" \
           -H "Content-Type: application/json" \
-          -d '{"workflow_id": "7565827159563550756", "parameters": {}}')
+          -H "Accept: application/json" \
+          -d "$REQUEST_DATA")
         
-        echo "HTTP Status Code: $response"
+        # 分离HTTP状态码和响应体
+        HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
+        RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed 's/HTTP_CODE:[0-9]*//')
         
-        if [ -f "response_body.txt" ]; then
-          echo "Response Body:"
-          cat response_body.txt
-          rm response_body.txt
-        fi
+        echo "HTTP状态码: $HTTP_CODE"
+        echo "响应内容: $RESPONSE_BODY"
         
-        if [ "$response" -eq 200 ]; then
-          echo "✅ 工作流触发成功"
+        # 根据状态码判断结果
+        if [ "$HTTP_CODE" -eq 200 ]; then
+          echo "✅ 工作流触发成功！"
+          echo "success" > result.txt
           exit 0
+        elif [ "$HTTP_CODE" -eq 401 ]; then
+          echo "❌ 认证失败 (401)"
+          echo "请检查："
+          echo "1. Token权限是否正确"
+          echo "2. Token是否已启用"
+          echo "3. 工作流ID是否正确"
+          exit 1
         else
-          echo "❌ 工作流触发失败，状态码: $response"
+          echo "❌ 请求失败，状态码: $HTTP_CODE"
           exit 1
         fi
 
-    - name: Notify Success
+    - name: Success Notification
       if: success()
       run: |
         echo "🎉 每日资讯工作流执行成功！"
         echo "执行时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
 
-    - name: Notify Failure
+    - name: Failure Notification
       if: failure()
       run: |
-        echo "❌ 每日资讯工作流执行失败"
+        echo "⚠️ 工作流执行失败"
         echo "失败时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "请检查 Token 权限和工作流配置"
+        echo "建议检查："
+        echo "1. 在扣子平台验证Token权限"
+        echo "2. 确认工作流ID正确"
+        echo "3. 检查网络连接"
