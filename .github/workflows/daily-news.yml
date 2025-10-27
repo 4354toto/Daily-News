@@ -1,79 +1,102 @@
-name: Daily News Workflow - Fetch Version
+name: Daily News Workflow - Fixed
 
 on:
   schedule:
-    - cron: '0 1 * * *'
+    - cron: '0 1 * * *'  # 每天UTC 1:00 (北京时间9:00)
   workflow_dispatch:
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-    - name: Setup Node.js
+    - name: Setup Node.js without cache
       uses: actions/setup-node@v4
       with:
         node-version: '18'
+        cache: 'npm'  # 这会查找 package-lock.json
 
-    - name: Trigger with Fetch API
+    - name: Create package.json and install Coze SDK
+      run: |
+        # 创建基本的 package.json
+        cat > package.json << 'EOF'
+        {
+          "name": "coze-workflow-trigger",
+          "version": "1.0.0",
+          "description": "",
+          "main": "index.js",
+          "dependencies": {
+            "@coze/api": "^1.0.0"
+          },
+          "scripts": {
+            "start": "node index.js"
+          }
+        }
+        EOF
+        
+        # 安装依赖
+        npm install
+
+    - name: Create and run trigger script
       env:
         COZE_TOKEN: ${{ secrets.COZE_TOKEN }}
       run: |
-        node -e "
-        async function triggerWorkflow() {
+        # 创建触发脚本
+        cat > trigger.js << 'EOF'
+        const { CozeAPI } = require('@coze/api');
+
+        async function main() {
           try {
             console.log('开始触发工作流...');
+            console.log('Workflow ID: 7562209382487113774');
             
-            const response = await fetch('https://api.coze.cn/v1/workflow/stream_run', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                // 注意：这里使用SDK可能使用的认证头
-                'Authorization': \`Bearer \${process.env.COZE_TOKEN}\`
-              },
-              body: JSON.stringify({
-                workflow_id: '7562209382487113774',
-                parameters: {
-                  input: 'https://auto.163.com/'
-                }
-              })
+            const apiClient = new CozeAPI({
+              token: process.env.COZE_TOKEN,
+              baseURL: 'https://api.coze.cn'
             });
 
-            if (!response.ok) {
-              const errorText = await response.text();
-              throw new Error(\`HTTP \${response.status}: \${errorText}\`);
-            }
-
-            // 处理流式响应
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
+            console.log('创建API客户端成功');
             
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              
-              const chunk = decoder.decode(value);
-              console.log('收到数据:', chunk);
-              
-              // 检查是否有错误
-              if (chunk.includes('event: Error')) {
-                throw new Error('流式响应中包含错误事件');
+            const res = await apiClient.workflows.runs.stream({
+              workflow_id: '7562209382487113774',
+              parameters: {
+                "input": "https://auto.163.com/"
               }
-            }
+            });
 
             console.log('✅ 工作流触发成功！');
+            console.log('响应:', JSON.stringify(res, null, 2));
             
           } catch (error) {
             console.error('❌ 工作流触发失败:');
+            console.error('错误名称:', error.name);
             console.error('错误信息:', error.message);
+            console.error('错误堆栈:', error.stack);
+            
+            if (error.response) {
+              console.error('响应状态:', error.response.status);
+              console.error('响应头:', error.response.headers);
+              console.error('响应数据:', error.response.data);
+            }
+            
             process.exit(1);
           }
         }
 
-        triggerWorkflow();
-        "
+        main();
+        EOF
+        
+        # 运行脚本
+        node trigger.js
 
     - name: Success
       if: success()
       run: |
-        echo "✅ 工作流触发成功"
+        echo "✅ 每日资讯工作流执行成功！"
+        echo "时间: $(date)"
         echo "已处理: https://auto.163.com/"
+
+    - name: Failure
+      if: failure()
+      run: |
+        echo "❌ 工作流执行失败"
+        echo "可能原因: Token认证失败或权限不足"
