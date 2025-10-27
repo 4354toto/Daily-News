@@ -1,68 +1,76 @@
-name: Daily News Workflow
+name: Daily News Workflow - Enhanced
 
 on:
   schedule:
-    - cron: '0 1 * * *'  # 每天UTC 1:00 (北京时间9:00)
+    - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
-    - name: Pre-check
+    - name: Trigger with Multiple Auth Methods
       run: |
-        echo "工作流ID: 756220938248711374"
-        echo "Token长度: ${#COZE_TOKEN}"
-
-    - name: Trigger Workflow with Correct Prefix
-      run: |
-        echo "=== 使用正确的Authorization前缀 ==="
+        echo "=== 尝试多种认证方法 ==="
         
-        # 方法1: 使用正确的Bearer前缀
-        response=$(curl -s -w "|HTTP_CODE:%{http_code}" \
+        # 方法1: 标准Bearer前缀
+        echo "方法1: Bearer前缀"
+        response1=$(curl -s -w "|HTTP_CODE:%{http_code}" \
           -X POST "https://api.coze.cn/v1/workflow/stream_run" \
           -H "Authorization: Bearer $COZE_TOKEN" \
           -H "Content-Type: application/json" \
           -d '{"workflow_id": "756220938248711374", "parameters": {}}')
         
-        http_code=$(echo "$response" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
-        response_body=$(echo "$response" | sed 's/|HTTP_CODE:[0-9]*//')
+        code1=$(echo "$response1" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
+        body1=$(echo "$response1" | sed 's/|HTTP_CODE:[0-9]*//')
         
-        echo "状态码: $http_code"
-        echo "响应: $response_body"
+        echo "方法1状态码: $code1"
         
-        if [ "$http_code" -eq 200 ]; then
-          echo "✅ API调用成功"
-          # 检查是否是流式响应
-          if echo "$response_body" | grep -q "event:"; then
-            echo "📡 收到流式响应，处理中..."
-            # 解析流式响应
-            if echo "$response_body" | grep -q "event: Error"; then
-              echo "❌ 流式响应中包含错误"
-              exit 1
-            else
-              echo "✅ 工作流触发成功"
-              exit 0
-            fi
-          else
-            echo "✅ 工作流触发成功"
+        if [ "$code1" -eq 200 ]; then
+          echo "✅ 方法1成功"
+          echo "响应: $body1"
+          exit 0
+        fi
+        
+        # 方法2: 尝试其他可能的前缀
+        echo "方法2: 尝试其他前缀"
+        prefixes=("Bearer" "Token" "Coze" "APIKey")
+        
+        for prefix in "${prefixes[@]}"; do
+          echo "尝试前缀: $prefix"
+          response=$(curl -s -w "|HTTP_CODE:%{http_code}" \
+            -X POST "https://api.coze.cn/v1/workflow/stream_run" \
+            -H "Authorization: $prefix $COZE_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"workflow_id": "756220938248711374", "parameters": {}}')
+          
+          code=$(echo "$response" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
+          body=$(echo "$response" | sed 's/|HTTP_CODE:[0-9]*//')
+          
+          echo "$prefix 状态码: $code"
+          
+          if [ "$code" -eq 200 ]; then
+            echo "✅ 使用前缀 '$prefix' 成功"
+            echo "响应: $body"
             exit 0
           fi
-        else
-          echo "❌ API调用失败: $http_code"
-          exit 1
-        fi
+        done
+        
+        echo "❌ 所有认证方法都失败"
+        echo "最后错误响应: $body1"
+        exit 1
 
     - name: Success
       if: success()
       run: |
-        echo "✅ 每日资讯工作流已触发"
-        echo "时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
-        echo "请检查扣子平台执行日志和企微群消息"
+        echo "🎉 工作流触发成功"
+        echo "执行时间: $(date)"
 
     - name: Failure
       if: failure()
       run: |
-        echo "❌ 执行失败"
-        echo "请检查Token权限和工作流配置"
+        echo "❌ 工作流触发失败"
+        echo "可能原因:"
+        echo "1. Token权限不足"
+        echo "2. 工作流ID错误"
+        echo "3. API端点变更"
