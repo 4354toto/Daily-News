@@ -19,58 +19,64 @@ jobs:
         echo "工作流ID: 7565827159563550756"
         echo "API端点: https://api.coze.cn/v1/workflow/stream_run"
 
-    - name: Test API with New Token
+    - name: Test API with Detailed Response
       run: |
         echo "=== 测试API调用 ==="
         
-        # 创建请求数据
-        REQUEST_DATA='{"workflow_id": "7565827159563550756", "parameters": {}}'
-        
-        # 发送请求并捕获完整响应
-        HTTP_RESPONSE=$(curl -s -w "HTTP_CODE:%{http_code}" \
-          -X POST "https://api.coze.cn/v1/workflow/stream_run" \
+        # 使用更详细的curl命令
+        curl -v -X POST "https://api.coze.cn/v1/workflow/stream_run" \
           -H "Authorization: Bearer ${{ secrets.COZE_TOKEN }}" \
           -H "Content-Type: application/json" \
           -H "Accept: application/json" \
-          -d "$REQUEST_DATA")
+          -d '{"workflow_id": "7565827159563550756", "parameters": {}}' \
+          -o response_body.txt \
+          -w "HTTP_STATUS:%{http_code}" \
+          2> curl_log.txt
         
-        # 分离HTTP状态码和响应体
-        HTTP_CODE=$(echo "$HTTP_RESPONSE" | grep -o 'HTTP_CODE:[0-9]*' | cut -d':' -f2)
-        RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed 's/HTTP_CODE:[0-9]*//')
-        
+        # 读取HTTP状态码
+        HTTP_CODE=$(grep -o 'HTTP_STATUS:[0-9]*' curl_log.txt | cut -d':' -f2)
         echo "HTTP状态码: $HTTP_CODE"
-        echo "响应内容: $RESPONSE_BODY"
+        
+        # 显示详细日志
+        echo "=== cURL详细日志 ==="
+        cat curl_log.txt
+        
+        # 显示响应体
+        echo "=== 响应体 ==="
+        if [ -f "response_body.txt" ]; then
+          cat response_body.txt
+          echo ""
+        else
+          echo "无响应体"
+        fi
+        
+        # 清理临时文件
+        rm -f response_body.txt curl_log.txt
         
         # 根据状态码判断结果
         if [ "$HTTP_CODE" -eq 200 ]; then
-          echo "✅ 工作流触发成功！"
-          echo "success" > result.txt
+          echo "✅ API调用成功！"
+          echo "注意：如果企微群未收到消息，请检查扣子平台工作流配置"
           exit 0
-        elif [ "$HTTP_CODE" -eq 401 ]; then
-          echo "❌ 认证失败 (401)"
-          echo "请检查："
-          echo "1. Token权限是否正确"
-          echo "2. Token是否已启用"
-          echo "3. 工作流ID是否正确"
-          exit 1
         else
-          echo "❌ 请求失败，状态码: $HTTP_CODE"
+          echo "❌ API调用失败，状态码: $HTTP_CODE"
           exit 1
         fi
 
     - name: Success Notification
       if: success()
       run: |
-        echo "🎉 每日资讯工作流执行成功！"
+        echo "🎉 GitHub Actions 执行成功！"
         echo "执行时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
         echo "北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
+        echo ""
+        echo "⚠️ 如果企微群未收到消息，请检查："
+        echo "1. 扣子平台工作流中的企微机器人配置"
+        echo "2. 企微群机器人的Webhook地址"
+        echo "3. 工作流执行日志"
 
     - name: Failure Notification
       if: failure()
       run: |
-        echo "⚠️ 工作流执行失败"
+        echo "❌ GitHub Actions 执行失败"
         echo "失败时间: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "建议检查："
-        echo "1. 在扣子平台验证Token权限"
-        echo "2. 确认工作流ID正确"
-        echo "3. 检查网络连接"
