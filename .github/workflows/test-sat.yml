@@ -1,0 +1,52 @@
+name: Test Service Access Token
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-sat:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Test SAT Token
+      env:
+        COZE_TOKEN: ${{ secrets.COZE_TOKEN }}
+      run: |
+        echo "🔐 测试服务访问令牌 (SAT)..."
+        echo "令牌类型: 服务访问令牌"
+        echo "令牌前缀: ${COZE_TOKEN:0:10}"
+        echo "令牌长度: ${#COZE_TOKEN} 字符"
+        
+        echo "🚀 发送测试请求..."
+        
+        response=$(curl -s -w "HTTP_STATUS:%{http_code}" \
+          -X POST "https://api.coze.cn/v1/workflow/stream_run" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: Bearer $COZE_TOKEN" \
+          -H "User-Agent: GitHub-Actions-SAT-Test" \
+          -d '{
+            "workflow_id": "7565827159563550756",
+            "parameters": {}
+          }')
+        
+        http_status=$(echo "$response" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d':' -f2)
+        response_body=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*//')
+        
+        echo "📊 HTTP 状态码: $http_status"
+        echo "📄 完整响应: $response_body"
+        
+        # 详细分析结果
+        if [ "$http_status" -eq 200 ]; then
+          echo "🎉 ✅ SAT 令牌测试成功！"
+          echo "💡 现在可以使用这个长期有效的令牌了"
+          echo "📅 可以设置定时任务了"
+        elif [ "$http_status" -eq 401 ]; then
+          echo "❌ SAT 令牌认证失败"
+          echo "可能原因:"
+          echo "  1. 令牌权限不足"
+          echo "  2. 工作流ID错误" 
+          echo "  3. 扣子平台限制了GitHub IP"
+          echo "  4. 令牌未正确激活"
+        else
+          echo "⚠️ 其他错误: $http_status"
+          echo "响应详情: $response_body"
+        fi
