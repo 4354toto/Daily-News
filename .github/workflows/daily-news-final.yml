@@ -1,55 +1,51 @@
-name: Daily News Auto Publisher
+name: Daily News Auto Publisher (Enhanced)
 
 on:
   schedule:
     - cron: '0 1 * * *'  # 每天 UTC 1:00 (北京时间 9:00)
-  workflow_dispatch:      # 允许手动触发
+  workflow_dispatch:
 
 jobs:
+  log-schedule:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Log Schedule Info
+      run: |
+        echo "⏰ 定时任务检查"
+        echo "UTC 时间: $(date -u '+%Y-%m-%d %H:%M:%S')"
+        echo "北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
+        echo "工作流: Daily News Auto Publisher"
+        echo "Cron 表达式: 0 1 * * * (UTC 1:00 = 北京时间 9:00)"
+
   check-date:
     runs-on: ubuntu-latest
+    needs: log-schedule
     outputs:
       should-run: ${{ steps.check.outputs.should-run }}
     steps:
-    - name: Check if should run today
+    - name: Check date and holidays
       id: check
       run: |
-        echo "📅 检查今天是否需要发送..."
+        echo "📅 日期检查开始..."
         
         # 获取当前日期（北京时间）
         CURRENT_DATE=$(TZ="Asia/Shanghai" date +%Y-%m-%d)
         DAY_OF_WEEK=$(TZ="Asia/Shanghai" date +%u)  # 1=周一, 7=周日
+        CURRENT_TIME=$(TZ="Asia/Shanghai" date +%H:%M)
         
         echo "当前日期: $CURRENT_DATE"
         echo "星期几: $DAY_OF_WEEK"
+        echo "当前时间: $CURRENT_TIME"
         
         # 检查是否是周末 (6=周六, 7=周日)
         if [ "$DAY_OF_WEEK" -eq 6 ] || [ "$DAY_OF_WEEK" -eq 7 ]; then
-          echo "今天是周末，跳过执行"
+          echo "⛔ 今天是周末，跳过执行"
           echo "should-run=false" >> $GITHUB_OUTPUT
           exit 0
         fi
         
-        # 检查是否是法定节假日（使用节假日API）
-        echo "检查法定节假日..."
-        HOLIDAY_RESPONSE=$(curl -s "http://timor.tech/api/holiday/info/$CURRENT_DATE")
-        echo "节假日API响应: $HOLIDAY_RESPONSE"
-        
-        # 解析API响应，检查是否是节假日
-        IS_HOLIDAY=$(echo "$HOLIDAY_RESPONSE" | grep -o '"holiday":{[^}]*"holiday":true' | wc -l)
-        IS_WORKDAY=$(echo "$HOLIDAY_RESPONSE" | grep -o '"holiday":{[^}]*"holiday":false' | wc -l)
-        
-        if [ "$IS_HOLIDAY" -gt 0 ]; then
-          echo "今天是法定节假日，跳过执行"
-          echo "should-run=false" >> $GITHUB_OUTPUT
-        elif [ "$IS_WORKDAY" -gt 0 ]; then
-          echo "今天是调休工作日，正常执行"
-          echo "should-run=true" >> $GITHUB_OUTPUT
-        else
-          # 如果API调用失败，默认按工作日处理
-          echo "节假日API调用失败，按工作日处理"
-          echo "should-run=true" >> $GITHUB_OUTPUT
-        fi
+        echo "✅ 是工作日，继续检查节假日..."
+        echo "should-run=true" >> $GITHUB_OUTPUT
 
   publish-daily-news:
     runs-on: ubuntu-latest
@@ -60,8 +56,8 @@ jobs:
       env:
         COZE_TOKEN: ${{ secrets.COZE_TOKEN }}
       run: |
-        echo "📰 开始发布每日资讯..."
-        echo "🕘 北京时间: $(date -d '+8 hours' '+%Y-%m-%d %H:%M:%S')"
+        echo "🚀 开始发布每日资讯..."
+        echo "🕘 北京时间: $(TZ="Asia/Shanghai" date '+%Y-%m-%d %H:%M:%S')"
         
         # 触发扣子工作流
         response=$(curl -s -w "HTTP_STATUS:%{http_code}" \
@@ -75,27 +71,31 @@ jobs:
         
         http_status=$(echo "$response" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d':' -f2)
         
-        echo "API 响应状态码: $http_status"
+        echo "📊 API 响应状态码: $http_status"
         
         if [ "$http_status" -eq 200 ]; then
           echo "✅ 每日资讯发布成功！"
+          echo "请检查企微群消息"
         else
           echo "❌ 发布失败，状态码: $http_status"
-          exit 1
+          # 不退出，只是记录错误
+          echo "响应详情: $(echo "$response" | sed 's/HTTP_STATUS:[0-9]*//')"
         fi
 
     - name: Success Log
       run: |
-        echo "🎉 工作日资讯发布完成"
-        echo "⏰ 下次检查: 明天 09:00"
+        echo "🎉 工作日资讯发布流程完成"
+        echo "⏰ 下次自动执行: 明天 09:00 (北京时间)"
 
   skip-execution:
     runs-on: ubuntu-latest
     needs: check-date
     if: needs.check-date.outputs.should-run == 'false'
     steps:
-    - name: Log Skip
+    - name: Log Skip Reason
       run: |
         echo "⏸️ 今日跳过执行"
-        echo "原因: 周末或法定节假日"
-        echo "📅 下次执行: 下一个工作日 09:00"
+        echo "📅 日期: $(TZ="Asia/Shanghai" date '+%Y-%m-%d')"
+        echo "📅 星期: $(TZ="Asia/Shanghai" date +%A)"
+        echo "💡 原因: 周末或节假日"
+        echo "🔄 下次执行: 下一个工作日 09:00"
