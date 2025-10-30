@@ -1,58 +1,29 @@
-name: Daily News Auto Publisher
+name: Daily News Auto Publisher - FIXED
 
 on:
   schedule:
-    # 使用多个备用时间点，确保触发
-    - cron: '0 1 * * *'   # 主触发: UTC 1:00 (北京时间 9:00)
-    - cron: '1 1 * * *'   # 备用1: UTC 1:01 (北京时间 9:01)
-    - cron: '2 1 * * *'   # 备用2: UTC 1:02 (北京时间 9:02)
-  workflow_dispatch:       # 手动触发
-  push:
-    branches: [ main ]    # 代码推送时也触发（用于测试）
+    # 每天 UTC 1:00 触发 (北京时间 9:00)
+    - cron: '0 1 * * *'
+  workflow_dispatch:
 
 jobs:
-  date-check:
-    runs-on: ubuntu-latest
-    outputs:
-      should-run: ${{ steps.check.outputs.should-run }}
-      current-date: ${{ steps.date.outputs.current-date }}
-      day-of-week: ${{ steps.date.outputs.day-of-week }}
-    steps:
-    - name: Get Beijing Time
-      id: date
-      run: |
-        CURRENT_DATE=$(TZ="Asia/Shanghai" date +%Y-%m-%d)
-        DAY_OF_WEEK=$(TZ="Asia/Shanghai" date +%u)
-        echo "current-date=$CURRENT_DATE" >> $GITHUB_OUTPUT
-        echo "day-of-week=$DAY_OF_WEEK" >> $GITHUB_OUTPUT
-        echo "🕒 北京时间: $(TZ="Asia/Shanghai" date '+%Y-%m-%d %H:%M:%S')"
-        echo "📅 日期: $CURRENT_DATE"
-        echo "📆 星期: $DAY_OF_WEEK (1=周一, 7=周日)"
-
-    - name: Check if Workday
-      id: check
-      run: |
-        # 周末不执行 (6=周六, 7=周日)
-        if [ "${{ steps.date.outputs.day-of-week }}" -eq 6 ] || [ "${{ steps.date.outputs.day-of-week }}" -eq 7 ]; then
-          echo "⛔ 今天是周末，跳过执行"
-          echo "should-run=false" >> $GITHUB_OUTPUT
-        else
-          echo "✅ 今天是工作日，执行每日资讯"
-          echo "should-run=true" >> $GITHUB_OUTPUT
-        fi
-
   publish-news:
     runs-on: ubuntu-latest
-    needs: date-check
-    if: needs.date-check.outputs.should-run == 'true'
     steps:
-    - name: Trigger Coze Workflow
+    - name: Log Execution Time
+      run: |
+        echo "🕒 工作流触发时间"
+        echo "========================"
+        echo "UTC 时间: $(date -u '+%Y-%m-%d %H:%M:%S')"
+        echo "北京时间: $(TZ="Asia/Shanghai" date '+%Y-%m-%d %H:%M:%S')"
+        echo "触发方式: ${{ github.event_name }}"
+        echo "========================"
+
+    - name: Publish Daily News
       env:
         COZE_TOKEN: ${{ secrets.COZE_TOKEN }}
       run: |
         echo "🚀 开始发布每日资讯..."
-        echo "📅 执行日期: ${{ needs.date-check.outputs.current-date }}"
-        echo "🕘 北京时间: $(TZ="Asia/Shanghai" date '+%H:%M:%S')"
         
         # 调用扣子API
         response=$(curl -s -w "HTTP_STATUS:%{http_code}" \
@@ -65,42 +36,20 @@ jobs:
           }')
         
         http_status=$(echo "$response" | grep -o 'HTTP_STATUS:[0-9]*' | cut -d':' -f2)
-        response_body=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*//')
         
-        echo "📊 API响应码: $http_status"
+        echo "API 状态码: $http_status"
         
         if [ "$http_status" -eq 200 ]; then
           echo "✅ 每日资讯发布成功！"
           echo "请检查企微群消息"
         else
           echo "❌ 发布失败: $http_status"
+          # 显示详细错误
+          response_body=$(echo "$response" | sed 's/HTTP_STATUS:[0-9]*//')
           echo "错误详情: $response_body"
-          # 不退出，继续记录
         fi
 
-    - name: Log Success
+    - name: Final Log
       run: |
-        echo "🎉 工作日资讯发布完成"
+        echo "🎉 工作流执行完成"
         echo "⏰ 下次执行: 明天 09:00 (北京时间)"
-
-  skip-notification:
-    runs-on: ubuntu-latest
-    needs: date-check
-    if: needs.date-check.outputs.should-run == 'false'
-    steps:
-    - name: Log Weekend Skip
-      run: |
-        echo "⏸️ 今日休息，不发送资讯"
-        echo "📅 日期: ${{ needs.date-check.outputs.current-date }}"
-        echo "📆 原因: 周末"
-        echo "🔄 下次工作日执行: 明天 09:00"
-
-  final-log:
-    runs-on: ubuntu-latest
-    needs: [publish-news, skip-notification]
-    steps:
-    - name: Workflow Complete
-      run: |
-        echo "🏁 GitHub Actions 工作流执行完成"
-        echo "✅ 所有步骤已处理"
-        echo "📊 查看详情: https://github.com/$GITHUB_REPOSITORY/actions"
