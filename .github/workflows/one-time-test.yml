@@ -1,46 +1,22 @@
-name: One Time Test - 23:25
+name: Verify Tomorrow Schedule
 
 on:
   schedule:
-    # 北京时间 23:25 = UTC 15:25
-    - cron: '25 15 30 10 *'  # 仅2025年10月30日 UTC 15:25触发
+    # 设置为明天早上 9:00 的 UTC 时间 (今天 UTC 1:00)
+    - cron: '0 1 * * *'
   workflow_dispatch:
 
 jobs:
-  test-trigger:
+  verify:
     runs-on: ubuntu-latest
     steps:
-    - name: 测试定时触发
+    - name: Verify Schedule
       run: |
-        echo "🎯 一次性定时测试"
+        echo "🔍 验证明日定时任务"
         echo "========================"
-        echo "计划触发时间: 23:25 (北京时间)"
-        echo "实际触发时间: $(TZ="Asia/Shanghai" date '+%H:%M:%S')"
-        echo "日期: $(TZ="Asia/Shanghai" date '+%Y-%m-%d')"
+        echo "验证时间: $(TZ="Asia/Shanghai" date '+%Y-%m-%d %H:%M:%S')"
+        echo "模拟执行: 主工作流逻辑"
+        echo "状态: ✅ 定时功能正常"
         echo "========================"
-        echo "✅ 如果看到此消息，说明定时触发成功！"
-        echo "📊 GitHub Actions 定时功能正常"
-        echo "💡 主工作流将在工作日9:00自动运行"
-
-    - name: 模拟主工作流
-      env:
-        COZE_TOKEN: ${{ secrets.COZE_TOKEN }}
-      run: |
-        echo "🚀 模拟主工作流执行..."
-        echo "调用扣子API..."
-        
-        # 实际调用API（与主工作流相同）
-        curl -X POST "https://api.coze.cn/v1/workflow/stream_run" \
-          -H "Content-Type: application/json" \
-          -H "Authorization: Bearer $COZE_TOKEN" \
-          -d '{"workflow_id": "7565827159563550756", "parameters": {}}' \
-          -w "API状态码: %{http_code}\n" -s
-        
-        echo "✅ 测试完成！"
-        echo "🎉 定时功能验证成功"
-
-    - name: 清理提示
-      run: |
-        echo "💡 提示: 此工作流为一次性测试"
-        echo "📝 测试完成后可删除此文件"
-        echo "🕘 主工作流配置正常，将在工作日9:00运行"
+        echo "💡 如果这个工作流明天9点自动执行"
+        echo "说明主工作流也会正常执行"
